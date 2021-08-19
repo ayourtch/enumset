@@ -20,6 +20,7 @@ maintenance = { status = "actively-developed" }
 
 [features]
 serde = ["serde2", "enumset_derive/serde"]
+enumflags = ["enumset_derive/enumflags"]
 
 [dependencies]
 enumset_derive = { version = "0.5.5", path = "../enumset_derive" }

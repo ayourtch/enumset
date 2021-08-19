@@ -145,6 +145,8 @@ impl EnumSetInfo {
 
             // Validate the discriminant.
             let discriminant = self.cur_discrim;
+
+            #[cfg(not(feature = "enumflags"))]
             if discriminant >= 128 {
                 let message = if self.variants.len() <= 127 {
                     "`#[derive(EnumSetType)]` currently only supports discriminants up to 127."
@@ -197,6 +199,7 @@ impl EnumSetInfo {
     }
 
     /// Computes the underlying type used to store the enumset.
+    #[cfg(not(feature = "enumflags"))]
     fn enumset_repr(&self) -> SynTokenStream {
         if self.max_discrim <= 7 {
             quote! { u8 }
@@ -212,6 +215,18 @@ impl EnumSetInfo {
             panic!("max_variant > 127?")
         }
     }
+    #[cfg(feature = "enumflags")]
+    fn enumset_repr(&self) -> SynTokenStream {
+        if self.max_discrim <= 128 {
+            quote! { u8 }
+        } else if self.max_discrim <= 32768 {
+            quote! { u16 }
+        } else if self.max_discrim <= 2147483648 {
+            quote! { u32 }
+        } else {
+            panic!("max_variant > 2147483648 ?")
+        }
+    }
     /// Computes the underlying type used to serialize the enumset.
     #[cfg(feature = "serde")]
     fn serde_repr(&self) -> SynTokenStream {
@@ -225,9 +240,14 @@ impl EnumSetInfo {
     /// Returns a bitmask of all variants in the set.
     fn all_variants(&self) -> u128 {
         let mut accum = 0u128;
+        #[cfg(not(feature = "enumflags"))]
         for variant in &self.variants {
             assert!(variant.variant_repr <= 127);
             accum |= 1u128 << variant.variant_repr as u128;
+        }
+        #[cfg(feature = "enumflags")]
+        for variant in &self.variants {
+            accum |= variant.variant_repr as u128;
         }
         accum
     }
@@ -380,10 +400,28 @@ fn enum_set_type_impl(info: EnumSetInfo) -> SynTokenStream {
         }
     } else if is_zst {
         let variant = &info.variants[0].name;
-        quote! {
+
+        #[cfg(feature = "enumflags")]
+        let fn_enum_into_u32 = quote! {
+            fn enum_into_u32(self) -> u32 {
+                if ((self as u128).count_ones() == 1) {
+                    (self as u128).trailing_zeros()
+                } else {
+                   panic!(concat!(stringify!(#name), "::", stringify!(#variant), " is defining more than one bit."))
+                }
+            }
+        };
+
+        #[cfg(not(feature = "enumflags"))]
+        let fn_enum_into_u32 = quote! {
             fn enum_into_u32(self) -> u32 {
                 self as u32
             }
+        };
+
+        quote! {
+            #fn_enum_into_u32
+
             unsafe fn enum_from_u32(val: u32) -> Self {
                 #name::#variant
             }
@@ -397,10 +435,27 @@ fn enum_set_type_impl(info: EnumSetInfo) -> SynTokenStream {
         let int_type: Vec<_> = ["u8", "u16", "u32", "u64", "u128"]
             .iter().map(|x| Ident::new(x, Span::call_site())).collect();
 
-        quote! {
+        #[cfg(feature = "enumflags")]
+        let fn_enum_into_u32 = quote! {
+            fn enum_into_u32(self) -> u32 {
+                if ((self as u128).count_ones() == 1) {
+                    (self as u128).trailing_zeros()
+                } else {
+                   panic!(concat!(stringify!(#name), " is defining more than one bit in the variant."))
+                }
+            }
+        };
+
+        #[cfg(not(feature = "enumflags"))]
+        let fn_enum_into_u32 = quote! {
             fn enum_into_u32(self) -> u32 {
                 self as u32
             }
+        };
+
+        quote! {
+            #fn_enum_into_u32
+
             unsafe fn enum_from_u32(val: u32) -> Self {
                 // We put these in const fields so the branches they guard aren't generated even
                 // on -O0

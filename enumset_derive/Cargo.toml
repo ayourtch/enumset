@@ -16,6 +16,7 @@ proc-macro = true
 
 [features]
 serde = []
+enumflags = []
 
 [dependencies]
 darling = "0.13.0"
